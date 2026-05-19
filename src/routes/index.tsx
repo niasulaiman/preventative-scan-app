@@ -9,11 +9,13 @@ import { AlertsPanel } from "@/components/dashboard/AlertsPanel";
 import { AIInsightsPanel } from "@/components/dashboard/AIInsightsPanel";
 import { CSVUploader } from "@/components/dashboard/CSVUploader";
 import { TimeFilter } from "@/components/dashboard/TimeFilter";
+import { NegativeDriversChart } from "@/components/dashboard/NegativeDriversChart";
 import { analyzeBatch, type AnalysisAggregate } from "@/lib/ai/mockOpenAI";
 import { aggregate, categoryStats, trendSeries } from "@/lib/analysis";
 import { buildAlerts } from "@/lib/alerts";
+import { negativeDriversSeries } from "@/lib/negativeDrivers";
 import { generateSampleFeedback } from "@/lib/sampleData";
-import { compareLabelFor, filterByRange, type TimeRange } from "@/lib/timeFilter";
+import { compareLabelFor, filterByRange, summaryTitleFor, type TimeRange } from "@/lib/timeFilter";
 import type { AnalyzedFeedback, RawFeedback } from "@/lib/ai/types";
 
 export const Route = createFileRoute("/")({
