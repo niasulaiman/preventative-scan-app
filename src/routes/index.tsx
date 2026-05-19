@@ -1,75 +1,115 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
+import { ExecutiveSummary } from "@/components/dashboard/ExecutiveSummary";
+import { TopIssues } from "@/components/dashboard/TopIssues";
+import { TrendCharts } from "@/components/dashboard/TrendCharts";
+import { FeedbackExplorer } from "@/components/dashboard/FeedbackExplorer";
+import { AlertsPanel } from "@/components/dashboard/AlertsPanel";
+import { AIInsightsPanel } from "@/components/dashboard/AIInsightsPanel";
+import { CSVUploader } from "@/components/dashboard/CSVUploader";
+import { analyzeBatch, type AnalysisAggregate } from "@/lib/ai/mockOpenAI";
+import { aggregate, categoryStats, trendSeries } from "@/lib/analysis";
+import { buildAlerts } from "@/lib/alerts";
+import { generateSampleFeedback } from "@/lib/sampleData";
+import type { AnalyzedFeedback, RawFeedback } from "@/lib/ai/types";
 
 export const Route = createFileRoute("/")({
-  component: Index,
+  component: DashboardPage,
+  head: () => ({
+    meta: [
+      { title: "PreventativeScan — Operations" },
+      { name: "description", content: "Member feedback and operations monitoring for preventive MRI screening." },
+    ],
+  }),
 });
 
-type Weather = {
-  temperature: number;
-  windspeed: number;
-  weathercode: number;
-};
-
-const codeToText: Record<number, string> = {
-  0: "Clear",
-  1: "Mostly clear",
-  2: "Partly cloudy",
-  3: "Overcast",
-  45: "Foggy",
-  48: "Foggy",
-  51: "Light drizzle",
-  53: "Drizzle",
-  55: "Heavy drizzle",
-  61: "Light rain",
-  63: "Rain",
-  65: "Heavy rain",
-  71: "Light snow",
-  73: "Snow",
-  75: "Heavy snow",
-  80: "Showers",
-  81: "Showers",
-  82: "Heavy showers",
-  95: "Thunderstorm",
-};
-
-function Index() {
-  const [weather, setWeather] = useState<Weather | null>(null);
-  const [error, setError] = useState<string | null>(null);
+function DashboardPage() {
+  const [raw, setRaw] = useState<RawFeedback[] | null>(null);
+  const [analyzed, setAnalyzed] = useState<AnalyzedFeedback[]>([]);
+  const [showUpload, setShowUpload] = useState(false);
 
   useEffect(() => {
-    fetch(
-      "https://api.open-meteo.com/v1/forecast?latitude=47.6062&longitude=-122.3321&current_weather=true&temperature_unit=fahrenheit&windspeed_unit=mph",
-    )
-      .then((r) => r.json())
-      .then((d) => setWeather(d.current_weather))
-      .catch(() => setError("Could not load weather"));
+    setRaw(generateSampleFeedback(520));
+  }, []);
+
+  useEffect(() => {
+    if (!raw) return;
+    let cancelled = false;
+    analyzeBatch(raw).then((res) => {
+      if (!cancelled) setAnalyzed(res);
+    });
+    return () => { cancelled = true; };
+  }, [raw]);
+
+  const { agg, prevAgg, alerts, cats, trend, latestDayAnalyzed, latestDayAgg } = useMemo(() => {
+    const sorted = [...analyzed].sort((a, b) => a.response_date.localeCompare(b.response_date));
+    const mid = Math.floor(sorted.length / 2);
+    const recent = sorted.slice(mid);
+    const prior = sorted.slice(0, mid);
+    const agg: AnalysisAggregate = aggregate(recent.length ? recent : analyzed);
+    const prevAgg: AnalysisAggregate | undefined = prior.length ? aggregate(prior) : undefined;
+    const latestDate = sorted[sorted.length - 1]?.response_date ?? "";
+    const latestDayAnalyzed = sorted.filter((a) => a.response_date === latestDate);
+    return {
+      agg,
+      prevAgg,
+      alerts: buildAlerts(analyzed),
+      cats: categoryStats(analyzed),
+      trend: trendSeries(analyzed, 3),
+      latestDayAnalyzed,
+      latestDayAgg: aggregate(latestDayAnalyzed),
+    };
+  }, [analyzed]);
+
+  const [today, setToday] = useState("");
+  useEffect(() => {
+    setToday(new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }));
   }, []);
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-6">
-      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-8 text-card-foreground shadow-sm">
-        <h1 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
-          Seattle
-        </h1>
-        {error ? (
-          <p className="mt-4 text-destructive">{error}</p>
-        ) : !weather ? (
-          <p className="mt-4 text-muted-foreground">Loading…</p>
-        ) : (
-          <>
-            <p className="mt-2 text-6xl font-semibold">
-              {Math.round(weather.temperature)}°F
-            </p>
-            <p className="mt-2 text-lg text-muted-foreground">
-              {codeToText[weather.weathercode] ?? "—"}
-            </p>
-            <p className="mt-4 text-sm text-muted-foreground">
-              Wind {Math.round(weather.windspeed)} mph
-            </p>
-          </>
-        )}
-      </div>
-    </main>
+    <div className="min-h-screen bg-background">
+      <DashboardHeader totalResponses={analyzed.length} alertCount={alerts.length} />
+
+      <main className="px-6 py-8 max-w-[1400px] mx-auto space-y-6">
+        {/* Compact operational summary header */}
+        <div className="flex items-end justify-between gap-4 flex-wrap">
+          <div>
+            <div className="text-xs text-muted-foreground min-h-[1rem]">{today}</div>
+            <h1 className="text-xl font-semibold tracking-tight mt-1">Operations overview</h1>
+          </div>
+          <button
+            onClick={() => setShowUpload((s) => !s)}
+            className="text-xs text-muted-foreground hover:text-foreground transition px-3 py-1.5 rounded-md border border-border hover:bg-muted"
+          >
+            {showUpload ? "Hide upload" : "Import CSV"}
+          </button>
+        </div>
+
+        {showUpload && <CSVUploader onParsed={(rows) => { setRaw(rows); setShowUpload(false); }} />}
+
+        {/* Daily summary — top of page */}
+        <AIInsightsPanel analyzed={latestDayAnalyzed} aggregate={latestDayAgg} />
+
+        {/* KPI overview */}
+        <ExecutiveSummary current={agg} previous={prevAgg} />
+
+        {/* Top issues */}
+        <TopIssues stats={cats} />
+
+        {/* Trends */}
+        <TrendCharts trend={trend} />
+
+        {/* Feedback explorer */}
+        <FeedbackExplorer data={analyzed} />
+
+        {/* Alerts — collapsed */}
+        <AlertsPanel alerts={alerts} />
+
+        <footer className="text-xs text-muted-foreground pt-2 pb-8">
+          Data refreshed automatically. CSV imports replace the current dataset.
+        </footer>
+      </main>
+    </div>
   );
 }

@@ -72,14 +72,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { title: "PreventativeScan — AI Operations Dashboard" },
+      { name: "description", content: "AI-powered NPS and operations monitoring for preventive MRI screening at scale." },
+      { property: "og:title", content: "PreventativeScan — AI Operations Dashboard" },
+      { property: "og:description", content: "AI-powered NPS and operations monitoring for preventive MRI screening at scale." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "PreventativeScan — AI Operations Dashboard" },
+      { name: "twitter:description", content: "AI-powered NPS and operations monitoring for preventive MRI screening at scale." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/8362c6c8-30b3-49f6-872b-dacd42fb6395/id-preview-d11ebfe4--d913301a-ea63-4f13-9c0d-347ba98446d5.lovable.app-1779169807531.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/8362c6c8-30b3-49f6-872b-dacd42fb6395/id-preview-d11ebfe4--d913301a-ea63-4f13-9c0d-347ba98446d5.lovable.app-1779169807531.png" },
     ],
     links: [
       {
