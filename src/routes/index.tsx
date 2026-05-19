@@ -8,10 +8,12 @@ import { FeedbackExplorer } from "@/components/dashboard/FeedbackExplorer";
 import { AlertsPanel } from "@/components/dashboard/AlertsPanel";
 import { AIInsightsPanel } from "@/components/dashboard/AIInsightsPanel";
 import { CSVUploader } from "@/components/dashboard/CSVUploader";
+import { TimeFilter } from "@/components/dashboard/TimeFilter";
 import { analyzeBatch, type AnalysisAggregate } from "@/lib/ai/mockOpenAI";
 import { aggregate, categoryStats, trendSeries } from "@/lib/analysis";
 import { buildAlerts } from "@/lib/alerts";
 import { generateSampleFeedback } from "@/lib/sampleData";
+import { compareLabelFor, filterByRange, type TimeRange } from "@/lib/timeFilter";
 import type { AnalyzedFeedback, RawFeedback } from "@/lib/ai/types";
 
 export const Route = createFileRoute("/")({
@@ -28,6 +30,7 @@ function DashboardPage() {
   const [raw, setRaw] = useState<RawFeedback[] | null>(null);
   const [analyzed, setAnalyzed] = useState<AnalyzedFeedback[]>([]);
   const [showUpload, setShowUpload] = useState(false);
+  const [range, setRange] = useState<TimeRange>("7d");
 
   useEffect(() => {
     setRaw(generateSampleFeedback(520));
@@ -42,25 +45,25 @@ function DashboardPage() {
     return () => { cancelled = true; };
   }, [raw]);
 
-  const { agg, prevAgg, alerts, cats, trend, latestDayAnalyzed, latestDayAgg } = useMemo(() => {
-    const sorted = [...analyzed].sort((a, b) => a.response_date.localeCompare(b.response_date));
-    const mid = Math.floor(sorted.length / 2);
-    const recent = sorted.slice(mid);
-    const prior = sorted.slice(0, mid);
-    const agg: AnalysisAggregate = aggregate(recent.length ? recent : analyzed);
-    const prevAgg: AnalysisAggregate | undefined = prior.length ? aggregate(prior) : undefined;
-    const latestDate = sorted[sorted.length - 1]?.response_date ?? "";
-    const latestDayAnalyzed = sorted.filter((a) => a.response_date === latestDate);
+  // Single source of truth: filter the analyzed dataset by the selected range,
+  // then derive every downstream analytic from `current` (with `previous` used
+  // only for comparison indicators).
+  const { current, previous, agg, prevAgg, cats, trend, alerts } = useMemo(() => {
+    const { current, previous } = filterByRange(analyzed, range);
+    const agg: AnalysisAggregate = aggregate(current);
+    const prevAgg: AnalysisAggregate | undefined = previous.length ? aggregate(previous) : undefined;
     return {
+      current,
+      previous,
       agg,
       prevAgg,
-      alerts: buildAlerts(analyzed),
-      cats: categoryStats(analyzed),
-      trend: trendSeries(analyzed, 3),
-      latestDayAnalyzed,
-      latestDayAgg: aggregate(latestDayAnalyzed),
+      cats: categoryStats(current),
+      trend: trendSeries(current, range === "today" ? 1 : range === "7d" ? 1 : 3),
+      alerts: buildAlerts(current),
     };
-  }, [analyzed]);
+  }, [analyzed, range]);
+
+  const compareLabel = compareLabelFor(range);
 
   const [today, setToday] = useState("");
   useEffect(() => {
@@ -69,45 +72,54 @@ function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <DashboardHeader totalResponses={analyzed.length} alertCount={alerts.length} />
+      <DashboardHeader totalResponses={current.length} alertCount={alerts.length} />
 
       <main className="px-6 py-8 max-w-[1400px] mx-auto space-y-6">
-        {/* Compact operational summary header */}
+        {/* Header row with time filter */}
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>
             <div className="text-xs text-muted-foreground min-h-[1rem]">{today}</div>
             <h1 className="text-xl font-semibold tracking-tight mt-1">Operations overview</h1>
           </div>
-          <button
-            onClick={() => setShowUpload((s) => !s)}
-            className="text-xs text-muted-foreground hover:text-foreground transition px-3 py-1.5 rounded-md border border-border hover:bg-muted"
-          >
-            {showUpload ? "Hide upload" : "Import CSV"}
-          </button>
+          <div className="flex items-center gap-2">
+            <TimeFilter value={range} onChange={setRange} />
+            <button
+              onClick={() => setShowUpload((s) => !s)}
+              className="text-xs text-muted-foreground hover:text-foreground transition px-3 py-1.5 rounded-md border border-border hover:bg-muted"
+            >
+              {showUpload ? "Hide upload" : "Import CSV"}
+            </button>
+          </div>
         </div>
 
         {showUpload && <CSVUploader onParsed={(rows) => { setRaw(rows); setShowUpload(false); }} />}
 
-        {/* Daily summary — top of page */}
-        <AIInsightsPanel analyzed={latestDayAnalyzed} aggregate={latestDayAgg} />
+        {/* Smooth transitions as the filter changes — fade the analytics block */}
+        <div
+          key={range}
+          className="space-y-6 animate-in fade-in duration-300"
+        >
+          {/* AI summary — regenerates per filtered slice */}
+          <AIInsightsPanel analyzed={current} aggregate={agg} />
 
-        {/* KPI overview */}
-        <ExecutiveSummary current={agg} previous={prevAgg} />
+          {/* KPI overview */}
+          <ExecutiveSummary current={agg} previous={prevAgg} compareLabel={compareLabel} />
 
-        {/* Top issues */}
-        <TopIssues stats={cats} />
+          {/* Top issues */}
+          <TopIssues stats={cats} />
 
-        {/* Trends */}
-        <TrendCharts trend={trend} />
+          {/* Trends */}
+          <TrendCharts trend={trend} />
 
-        {/* Feedback explorer */}
-        <FeedbackExplorer data={analyzed} />
+          {/* Feedback explorer — operates on the same filtered dataset */}
+          <FeedbackExplorer data={current} />
 
-        {/* Alerts — collapsed */}
-        <AlertsPanel alerts={alerts} />
+          {/* Alerts */}
+          <AlertsPanel alerts={alerts} />
+        </div>
 
         <footer className="text-xs text-muted-foreground pt-2 pb-8">
-          Data refreshed automatically. CSV imports replace the current dataset.
+          Showing {current.length.toLocaleString()} responses · {compareLabel}. CSV imports replace the current dataset.
         </footer>
       </main>
     </div>

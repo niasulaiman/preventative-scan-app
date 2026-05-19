@@ -4,27 +4,30 @@ import type { AnalysisAggregate } from "@/lib/ai/mockOpenAI";
 interface Props {
   current: AnalysisAggregate;
   previous?: AnalysisAggregate;
+  compareLabel?: string;
 }
 
-export function ExecutiveSummary({ current, previous }: Props) {
-  const npsDelta = previous ? current.avgNps - previous.avgNps : undefined;
-  const negDelta = previous ? (current.negativePct - previous.negativePct) * 100 : undefined;
+export function ExecutiveSummary({ current, previous, compareLabel = "vs prior period" }: Props) {
+  const npsDelta = previous && previous.total ? current.avgNps - previous.avgNps : undefined;
+  const negDelta = previous && previous.total ? (current.negativePct - previous.negativePct) * 100 : undefined;
   const highSevPct = current.total ? (current.highSeverityCount / current.total) * 100 : 0;
   const prevHighSevPct = previous && previous.total ? (previous.highSeverityCount / previous.total) * 100 : undefined;
   const highSevDelta = prevHighSevPct != null ? highSevPct - prevHighSevPct : undefined;
+  const respDelta = previous && previous.total ? current.total - previous.total : undefined;
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
       <MetricCard
         label="Responses"
         value={current.total.toLocaleString()}
-        hint="In window"
+        delta={respDelta}
+        hint={compareLabel}
       />
       <MetricCard
         label="Average NPS"
         value={current.avgNps.toFixed(1)}
         delta={npsDelta}
-        hint="vs prior period"
+        hint={compareLabel}
       />
       <MetricCard
         label="Negative sentiment"
@@ -32,7 +35,7 @@ export function ExecutiveSummary({ current, previous }: Props) {
         delta={negDelta}
         deltaSuffix="pp"
         invertDelta
-        hint="vs prior period"
+        hint={compareLabel}
       />
       <MetricCard
         label="High-priority issues"
