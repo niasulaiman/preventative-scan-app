@@ -7,9 +7,10 @@ import type { AnalyzedFeedback } from "@/lib/ai/types";
 interface Props {
   analyzed: AnalyzedFeedback[];
   aggregate: AnalysisAggregate;
+  title?: string;
 }
 
-export function AIInsightsPanel({ analyzed, aggregate }: Props) {
+export function AIInsightsPanel({ analyzed, aggregate, title = "Daily summary" }: Props) {
   const [brief, setBrief] = useState<ExecutiveBrief | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -21,13 +22,13 @@ export function AIInsightsPanel({ analyzed, aggregate }: Props) {
     setLoading(false);
   };
 
-  useEffect(() => { regen(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [aggregate.total]);
+  useEffect(() => { regen(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [aggregate.total, title]);
 
   return (
     <div className="panel-elevated p-5">
       <div className="flex items-baseline justify-between mb-4">
         <div>
-          <h2 className="text-base font-semibold text-foreground">Daily summary</h2>
+          <h2 className="text-base font-semibold text-foreground">{title}</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
             {brief ? `Updated ${new Date(brief.generated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "—"}
           </p>

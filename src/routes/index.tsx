@@ -9,11 +9,13 @@ import { AlertsPanel } from "@/components/dashboard/AlertsPanel";
 import { AIInsightsPanel } from "@/components/dashboard/AIInsightsPanel";
 import { CSVUploader } from "@/components/dashboard/CSVUploader";
 import { TimeFilter } from "@/components/dashboard/TimeFilter";
+import { NegativeDriversChart } from "@/components/dashboard/NegativeDriversChart";
 import { analyzeBatch, type AnalysisAggregate } from "@/lib/ai/mockOpenAI";
 import { aggregate, categoryStats, trendSeries } from "@/lib/analysis";
 import { buildAlerts } from "@/lib/alerts";
+import { negativeDriversSeries } from "@/lib/negativeDrivers";
 import { generateSampleFeedback } from "@/lib/sampleData";
-import { compareLabelFor, filterByRange, type TimeRange } from "@/lib/timeFilter";
+import { compareLabelFor, filterByRange, summaryTitleFor, type TimeRange } from "@/lib/timeFilter";
 import type { AnalyzedFeedback, RawFeedback } from "@/lib/ai/types";
 
 export const Route = createFileRoute("/")({
@@ -48,22 +50,23 @@ function DashboardPage() {
   // Single source of truth: filter the analyzed dataset by the selected range,
   // then derive every downstream analytic from `current` (with `previous` used
   // only for comparison indicators).
-  const { current, previous, agg, prevAgg, cats, trend, alerts } = useMemo(() => {
+  const { current, agg, prevAgg, cats, trend, alerts, negDrivers } = useMemo(() => {
     const { current, previous } = filterByRange(analyzed, range);
     const agg: AnalysisAggregate = aggregate(current);
     const prevAgg: AnalysisAggregate | undefined = previous.length ? aggregate(previous) : undefined;
     return {
       current,
-      previous,
       agg,
       prevAgg,
       cats: categoryStats(current),
       trend: trendSeries(current, range === "today" ? 1 : range === "7d" ? 1 : 3),
-      alerts: buildAlerts(current),
+      alerts: buildAlerts(current, range, analyzed),
+      negDrivers: negativeDriversSeries(current, range),
     };
   }, [analyzed, range]);
 
   const compareLabel = compareLabelFor(range);
+  const summaryTitle = summaryTitleFor(range);
 
   const [today, setToday] = useState("");
   useEffect(() => {
@@ -100,7 +103,7 @@ function DashboardPage() {
           className="space-y-6 animate-in fade-in duration-300"
         >
           {/* AI summary — regenerates per filtered slice */}
-          <AIInsightsPanel analyzed={current} aggregate={agg} />
+          <AIInsightsPanel analyzed={current} aggregate={agg} title={summaryTitle} />
 
           {/* KPI overview */}
           <ExecutiveSummary current={agg} previous={prevAgg} compareLabel={compareLabel} />
@@ -110,6 +113,9 @@ function DashboardPage() {
 
           {/* Trends */}
           <TrendCharts trend={trend} />
+
+          {/* What's driving negative feedback */}
+          <NegativeDriversChart series={negDrivers} />
 
           {/* Feedback explorer — operates on the same filtered dataset */}
           <FeedbackExplorer data={current} />
