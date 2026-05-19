@@ -6,15 +6,19 @@ import type { AnalyzedFeedback, RawFeedback } from "./ai/types";
 
 export type TimeRange = "today" | "7d" | "30d" | "all";
 
-export const TIME_RANGE_OPTIONS: { value: TimeRange; label: string; compareLabel: string }[] = [
-  { value: "today", label: "Today", compareLabel: "vs yesterday" },
-  { value: "7d", label: "Last 7 days", compareLabel: "vs previous week" },
-  { value: "30d", label: "Last 30 days", compareLabel: "vs previous month" },
-  { value: "all", label: "All time", compareLabel: "vs prior period" },
+export const TIME_RANGE_OPTIONS: { value: TimeRange; label: string; compareLabel: string; summaryTitle: string }[] = [
+  { value: "today", label: "Today", compareLabel: "vs yesterday", summaryTitle: "Daily summary" },
+  { value: "7d", label: "Last 7 days", compareLabel: "vs previous week", summaryTitle: "Weekly summary" },
+  { value: "30d", label: "Last 30 days", compareLabel: "vs previous month", summaryTitle: "Monthly summary" },
+  { value: "all", label: "All time", compareLabel: "vs prior period", summaryTitle: "Summary of all dates" },
 ];
 
 export function compareLabelFor(range: TimeRange): string {
   return TIME_RANGE_OPTIONS.find((o) => o.value === range)?.compareLabel ?? "vs prior period";
+}
+
+export function summaryTitleFor(range: TimeRange): string {
+  return TIME_RANGE_OPTIONS.find((o) => o.value === range)?.summaryTitle ?? "Summary";
 }
 
 // Window length in days for a given range. `all` is handled separately.
