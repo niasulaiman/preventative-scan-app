@@ -1,7 +1,8 @@
-// Alerting engine — threshold rules + lightweight anomaly detection.
+// Alerting engine — behavior adapts to the selected dashboard time filter.
 
 import type { AnalyzedFeedback, Category } from "./ai/types";
 import { categoryStats, trendSeries } from "./analysis";
+import type { TimeRange } from "./timeFilter";
 
 export type AlertSeverity = "info" | "warning" | "critical";
 
@@ -17,81 +18,170 @@ export interface Alert {
   trend: number[]; // sparkline points
 }
 
-export function buildAlerts(analyzed: AnalyzedFeedback[]): Alert[] {
+const ACTION_BY_CATEGORY: Partial<Record<Category, string>> = {
+  Scheduling: "Add scheduling capacity in affected regions and audit reschedule policy.",
+  Communication: "Roll out templated multi-channel updates across the member journey.",
+  "Facility Experience": "Trigger facility audit and increase on-site host coverage at peak hours.",
+  "Wait Times": "Reduce overbooking ratios and add live wait-time visibility for members.",
+  Billing: "Run a billing reconciliation sweep and add proactive insurance status notifications.",
+  "MRI Experience": "Refresh tech training on claustrophobia protocol and pre-scan walkthrough.",
+  "Results Delivery": "Add SLA monitoring on results turnaround and proactive follow-up calls.",
+  "Staff Experience": "Targeted coaching and shift-level NPS reviews at impacted sites.",
+  "Technical Issues": "Spin up an incident bridge and ship portal stability fixes this sprint.",
+};
+
+function actionFor(c: Category): string {
+  return ACTION_BY_CATEGORY[c] ?? "Tag for manual review and route to operations triage.";
+}
+
+/**
+ * Build operational alerts that adapt to the selected time filter.
+ *
+ * - today  : spike detection vs recent historical average, min mention count
+ * - 7d     : flat % threshold + week-over-week trend change
+ * - 30d    : flat 5% threshold
+ * - all    : no active operational alerts (historical view)
+ *
+ * `history` is the broader analyzed dataset used to compute baselines for
+ * spike detection on the daily view.
+ */
+export function buildAlerts(
+  current: AnalyzedFeedback[],
+  range: TimeRange = "7d",
+  history: AnalyzedFeedback[] = current,
+): Alert[] {
+  // All-time view is historical — no active operational alerts.
+  if (range === "all") return [];
+
   const alerts: Alert[] = [];
-  const total = analyzed.length || 1;
-  const cats = categoryStats(analyzed);
-  const trend = trendSeries(analyzed);
+  const total = current.length || 1;
+  const cats = categoryStats(current);
+  const trend = trendSeries(current);
 
-  // Rule 1: category share > 5%
-  for (const c of cats) {
-    if (c.share > 0.05) {
-      const sev: AlertSeverity =
-        c.share > 0.15 ? "critical" : c.share > 0.1 ? "warning" : "info";
-      alerts.push({
-        id: `cat-${c.category}`,
-        severity: sev,
-        title: `${c.category} exceeds 5% of responses`,
-        description: `${Math.round(c.share * 100)}% of feedback (${c.count} responses) cite ${c.category}. Trend ${c.trendDelta >= 0 ? "+" : ""}${Math.round(c.trendDelta * 100)}% vs prior period.`,
-        category: c.category,
-        affectedSegment: c.topQuotes[0]?.member_location
-          ? `Concentrated in ${c.topQuotes[0].member_location}`
-          : "Multi-region",
-        suggestedAction: c.recommendedAction,
-        metric: c.share,
-        trend: trend.slice(-8).map((t) => t.responses),
-      });
+  if (range === "today") {
+    // Spike detection: compare today's category counts to the avg daily
+    // count over the prior 14 days. Require a minimum mention count to
+    // avoid alerting on noise.
+    const MIN_MENTIONS = 3;
+    const SPIKE_FACTOR = 2.0;
+    const today = current[0]?.response_date?.slice(0, 10) ?? "";
+    const baselineDays = 14;
+
+    const baselineEnd = today;
+    const baselineStart = new Date(baselineEnd);
+    baselineStart.setDate(baselineStart.getDate() - baselineDays);
+    const baselineStartISO = baselineStart.toISOString().slice(0, 10);
+
+    const baseline = history.filter(
+      (h) => h.response_date >= baselineStartISO && h.response_date < baselineEnd,
+    );
+
+    const byCatBaseline = new Map<Category, number>();
+    for (const b of baseline) {
+      byCatBaseline.set(b.category, (byCatBaseline.get(b.category) ?? 0) + 1);
+    }
+
+    for (const c of cats) {
+      if (c.count < MIN_MENTIONS) continue;
+      const baseAvg = (byCatBaseline.get(c.category) ?? 0) / baselineDays;
+      if (baseAvg === 0) {
+        if (c.count >= MIN_MENTIONS * 2) {
+          alerts.push({
+            id: `spike-${c.category}`,
+            severity: "warning",
+            title: `New issue cluster: ${c.category}`,
+            description: `${c.count} mentions today with no comparable activity in the prior ${baselineDays} days.`,
+            category: c.category,
+            affectedSegment: c.topQuotes[0]?.member_location
+              ? `Concentrated in ${c.topQuotes[0].member_location}`
+              : "Multi-region",
+            suggestedAction: actionFor(c.category),
+            metric: c.count,
+            trend: trend.slice(-8).map((t) => t.responses),
+          });
+        }
+        continue;
+      }
+      const ratio = c.count / baseAvg;
+      if (ratio >= SPIKE_FACTOR) {
+        const sev: AlertSeverity = ratio >= 3 ? "critical" : "warning";
+        alerts.push({
+          id: `spike-${c.category}`,
+          severity: sev,
+          title: `${c.category} spike vs recent average`,
+          description: `${c.count} mentions today vs a ${baselineDays}-day daily average of ${baseAvg.toFixed(1)} (${ratio.toFixed(1)}× normal).`,
+          category: c.category,
+          affectedSegment: c.topQuotes[0]?.member_location
+            ? `Concentrated in ${c.topQuotes[0].member_location}`
+            : "Multi-region",
+          suggestedAction: actionFor(c.category),
+          metric: ratio,
+          trend: trend.slice(-8).map((t) => t.responses),
+        });
+      }
+    }
+  } else if (range === "7d") {
+    // % threshold + week-over-week trend.
+    for (const c of cats) {
+      const share = c.share;
+      const wow = c.trendDelta; // recent half vs prior half within window
+      const breaches = share > 0.05;
+      const trending = wow > 0.2;
+      if (breaches || (share > 0.03 && trending)) {
+        const sev: AlertSeverity =
+          share > 0.15 || (share > 0.08 && trending) ? "critical" :
+          share > 0.1 || trending ? "warning" : "info";
+        alerts.push({
+          id: `wow-${c.category}`,
+          severity: sev,
+          title: `${c.category} at ${Math.round(share * 100)}% of weekly responses`,
+          description: `${c.count} responses this week. Week-over-week ${wow >= 0 ? "+" : ""}${Math.round(wow * 100)}%.`,
+          category: c.category,
+          affectedSegment: c.topQuotes[0]?.member_location
+            ? `Concentrated in ${c.topQuotes[0].member_location}`
+            : "Multi-region",
+          suggestedAction: actionFor(c.category),
+          metric: share,
+          trend: trend.slice(-8).map((t) => t.responses),
+        });
+      }
+    }
+  } else if (range === "30d") {
+    // Flat 5% threshold.
+    for (const c of cats) {
+      if (c.share > 0.05) {
+        const sev: AlertSeverity =
+          c.share > 0.15 ? "critical" : c.share > 0.1 ? "warning" : "info";
+        alerts.push({
+          id: `cat-${c.category}`,
+          severity: sev,
+          title: `${c.category} exceeds 5% of monthly responses`,
+          description: `${Math.round(c.share * 100)}% of feedback (${c.count} responses) cite ${c.category}.`,
+          category: c.category,
+          affectedSegment: c.topQuotes[0]?.member_location
+            ? `Concentrated in ${c.topQuotes[0].member_location}`
+            : "Multi-region",
+          suggestedAction: actionFor(c.category),
+          metric: c.share,
+          trend: trend.slice(-8).map((t) => t.responses),
+        });
+      }
     }
   }
 
-  // Rule 2: negative sentiment spike (recent half > prior half by >25%)
-  if (trend.length >= 4) {
-    const half = Math.floor(trend.length / 2);
-    const recent = trend.slice(half).reduce((s, t) => s + t.negative, 0);
-    const prior = trend.slice(0, half).reduce((s, t) => s + t.negative, 0);
-    if (prior > 0 && (recent - prior) / prior > 0.25) {
+  // High-severity surge is meaningful on weekly and monthly views.
+  if (range === "7d" || range === "30d") {
+    const hs = current.filter((a) => a.severity === "high" || a.severity === "critical").length;
+    if (hs / total > 0.08) {
       alerts.push({
-        id: "sent-spike",
-        severity: "warning",
-        title: "Negative sentiment is spiking",
-        description: `Negative responses up ${Math.round(((recent - prior) / prior) * 100)}% in the recent period. ${recent} negatives vs ${prior} prior.`,
-        affectedSegment: "All segments",
-        suggestedAction: "Open an incident review and notify operations leadership.",
-        metric: (recent - prior) / prior,
-        trend: trend.map((t) => t.negative),
-      });
-    }
-  }
-
-  // Rule 3: high-severity surge
-  const hs = analyzed.filter((a) => a.severity === "high" || a.severity === "critical").length;
-  if (hs / total > 0.08) {
-    alerts.push({
-      id: "sev-surge",
-      severity: "critical",
-      title: "High-severity responses above safe threshold",
-      description: `${hs} high-severity responses (${Math.round((hs / total) * 100)}% of total). Trust and retention risk.`,
-      affectedSegment: "Detractors + flagged members",
-      suggestedAction: "Launch 24h outreach playbook to all flagged members.",
-      metric: hs / total,
-      trend: trend.map((t) => t.highSeverity),
-    });
-  }
-
-  // Rule 4: anomaly — sudden bucket spike in any category
-  if (trend.length >= 5) {
-    const last = trend[trend.length - 1];
-    const avg = trend.slice(0, -1).reduce((s, t) => s + t.responses, 0) / (trend.length - 1);
-    if (last.responses > avg * 1.6 && last.responses > 8) {
-      alerts.push({
-        id: "anomaly-volume",
-        severity: "warning",
-        title: "Volume anomaly detected",
-        description: `Latest bucket received ${last.responses} responses vs avg ${avg.toFixed(1)} — investigate upstream event.`,
-        affectedSegment: "Recent member cohort",
-        suggestedAction: "Cross-reference with recent ops events (releases, schedule changes).",
-        metric: last.responses / avg,
-        trend: trend.map((t) => t.responses),
+        id: "sev-surge",
+        severity: "critical",
+        title: "High-severity responses above safe threshold",
+        description: `${hs} high-severity responses (${Math.round((hs / total) * 100)}% of total).`,
+        affectedSegment: "Detractors + flagged members",
+        suggestedAction: "Launch 24h outreach playbook to all flagged members.",
+        metric: hs / total,
+        trend: trend.map((t) => t.highSeverity),
       });
     }
   }
