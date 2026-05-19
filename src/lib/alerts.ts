@@ -64,13 +64,14 @@ export function buildAlerts(
     // avoid alerting on noise.
     const MIN_MENTIONS = 3;
     const SPIKE_FACTOR = 2.0;
-    const today = current[0]?.response_date?.slice(0, 10) ?? "";
+    const today = current[0]?.response_date?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
     const baselineDays = 14;
 
     const baselineEnd = today;
-    const baselineStart = new Date(baselineEnd);
-    baselineStart.setDate(baselineStart.getDate() - baselineDays);
-    const baselineStartISO = baselineStart.toISOString().slice(0, 10);
+    const baselineStartDate = new Date(baselineEnd);
+    if (isNaN(baselineStartDate.getTime())) return alerts;
+    baselineStartDate.setDate(baselineStartDate.getDate() - baselineDays);
+    const baselineStartISO = baselineStartDate.toISOString().slice(0, 10);
 
     const baseline = history.filter(
       (h) => h.response_date >= baselineStartISO && h.response_date < baselineEnd,
