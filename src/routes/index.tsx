@@ -103,7 +103,7 @@ function DashboardPage() {
           className="space-y-6 animate-in fade-in duration-300"
         >
           {/* AI summary — regenerates per filtered slice */}
-          <AIInsightsPanel analyzed={current} aggregate={agg} />
+          <AIInsightsPanel analyzed={current} aggregate={agg} title={summaryTitle} />
 
           {/* KPI overview */}
           <ExecutiveSummary current={agg} previous={prevAgg} compareLabel={compareLabel} />
@@ -113,6 +113,9 @@ function DashboardPage() {
 
           {/* Trends */}
           <TrendCharts trend={trend} />
+
+          {/* What's driving negative feedback */}
+          <NegativeDriversChart series={negDrivers} />
 
           {/* Feedback explorer — operates on the same filtered dataset */}
           <FeedbackExplorer data={current} />
