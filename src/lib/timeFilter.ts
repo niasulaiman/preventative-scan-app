@@ -31,10 +31,31 @@ function windowDays(range: TimeRange): number | null {
   }
 }
 
-function startOfDay(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
+function isoDate(s: string): string | null {
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  return `${m[1]}-${m[2]}-${m[3]}`;
+}
+
+function latestDateISO<T extends { response_date: string }>(data: T[]): string | null {
+  return data.reduce<string | null>((latest, row) => {
+    const date = isoDate(row.response_date);
+    return date && (!latest || date > latest) ? date : latest;
+  }, null);
+}
+
+function isoFromUTCDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function addDaysISO(s: string, days: number): string {
+  const [y, m, d] = s.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d + days));
+  return isoFromUTCDate(date);
+}
+
+function todayISO(now: Date): string {
+  return isoFromUTCDate(new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())));
 }
 
 /**
@@ -47,20 +68,17 @@ export function rangeWindows<T extends { response_date: string }>(
   range: TimeRange,
   now: Date = new Date(),
 ): { current: [string, string]; previous: [string, string] | null } {
-  const today = startOfDay(now);
+  const anchor = latestDateISO(data) ?? todayISO(now);
   const days = windowDays(range);
 
   if (days != null) {
-    const curEnd = new Date(today);
-    curEnd.setDate(curEnd.getDate() + 1); // include today fully
-    const curStart = new Date(curEnd);
-    curStart.setDate(curStart.getDate() - days);
-    const prevEnd = new Date(curStart);
-    const prevStart = new Date(prevEnd);
-    prevStart.setDate(prevStart.getDate() - days);
+    const curEnd = addDaysISO(anchor, 1); // include the latest dataset date fully
+    const curStart = addDaysISO(curEnd, -days);
+    const prevEnd = curStart;
+    const prevStart = addDaysISO(prevEnd, -days);
     return {
-      current: [iso(curStart), iso(curEnd)],
-      previous: [iso(prevStart), iso(prevEnd)],
+      current: [curStart, curEnd],
+      previous: [prevStart, prevEnd],
     };
   }
 
@@ -80,11 +98,8 @@ export function rangeWindows<T extends { response_date: string }>(
   };
 }
 
-function iso(d: Date): string { return d.toISOString().slice(0, 10); }
 function bumpDay(s: string): string {
-  const d = new Date(s);
-  d.setDate(d.getDate() + 1);
-  return iso(d);
+  return addDaysISO(s, 1);
 }
 
 export function filterByRange<T extends { response_date: string }>(
