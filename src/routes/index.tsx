@@ -50,22 +50,23 @@ function DashboardPage() {
   // Single source of truth: filter the analyzed dataset by the selected range,
   // then derive every downstream analytic from `current` (with `previous` used
   // only for comparison indicators).
-  const { current, previous, agg, prevAgg, cats, trend, alerts } = useMemo(() => {
+  const { current, agg, prevAgg, cats, trend, alerts, negDrivers } = useMemo(() => {
     const { current, previous } = filterByRange(analyzed, range);
     const agg: AnalysisAggregate = aggregate(current);
     const prevAgg: AnalysisAggregate | undefined = previous.length ? aggregate(previous) : undefined;
     return {
       current,
-      previous,
       agg,
       prevAgg,
       cats: categoryStats(current),
       trend: trendSeries(current, range === "today" ? 1 : range === "7d" ? 1 : 3),
-      alerts: buildAlerts(current),
+      alerts: buildAlerts(current, range, analyzed),
+      negDrivers: negativeDriversSeries(current, range),
     };
   }, [analyzed, range]);
 
   const compareLabel = compareLabelFor(range);
+  const summaryTitle = summaryTitleFor(range);
 
   const [today, setToday] = useState("");
   useEffect(() => {
